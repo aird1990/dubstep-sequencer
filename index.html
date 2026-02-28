@@ -250,6 +250,26 @@
             text-align: center;
         }
 
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            display: none; justify-content: center; align-items: center;
+            z-index: 50; backdrop-filter: blur(2px);
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            background: var(--panel-texture); border: 2px solid var(--wub-cyan);
+            border-radius: 4px; padding: 24px; width: 90%; max-width: 380px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
+        }
+        .modal-input {
+            background: #111; border: 1px solid #444; color: var(--wub-green);
+            padding: 6px 10px; border-radius: 2px; width: 80px;
+            font-family: 'Audiowide', cursive; text-align: center; text-transform: uppercase;
+        }
+        .modal-input:focus { border-color: var(--wub-green); outline: none; box-shadow: 0 0 8px rgba(57, 255, 20, 0.4); }
+
         @media (max-width: 640px) {
             h1 { font-size: 2rem; }
             .sequencer-container { padding: 12px; }
@@ -272,6 +292,7 @@
                     <button id="playBtn" class="btn">▶ PLAY</button>
                     <button id="stopBtn" class="btn">■ STOP</button>
                     <button id="clearBtn" class="btn btn-danger">WIPE</button>
+                    <button id="settingsBtn" class="btn" title="MIDI Settings">⚙ SETTINGS</button>
                 </div>
                 
                 <div class="flex flex-wrap gap-4 items-center justify-end">
@@ -360,6 +381,25 @@
     
     <div class="description">
         140 BPM // Half-time Madness
+    </div>
+
+    <!-- MIDI Settings Modal -->
+    <div id="midiSettingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 class="text-xl font-bold text-cyan-400 mb-4 text-center font-audiowide">MIDI MAPPING</h2>
+            <p class="text-xs text-gray-400 mb-4 text-center">Format: Note+Octave (e.g. C3, D#2)<br>Roland Standard (C4 = 60)</p>
+            
+            <div id="midi-settings-list" class="mb-4">
+                <!-- Dynamic input rows injected here -->
+            </div>
+            
+            <div id="settings-error" class="text-red-500 text-xs text-center h-4 mb-4 font-audiowide"></div>
+
+            <div class="flex justify-end gap-2">
+                <button id="cancelSettingsBtn" class="btn">CANCEL</button>
+                <button id="saveSettingsBtn" class="btn btn-cyan">SAVE</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -520,6 +560,89 @@
             new Array(STEPS).fill(false)  // Kick
         ];
 
+        // --- MIDI Mapping Setup ---
+        const TRACK_LABELS = ['Cymbal', 'Hi-Hat', 'Snare', 'Sub Kick'];
+        // Default mapping: A#2, F#2, D2, C2 (Based on C4=60 standard)
+        let midiMapping = [46, 42, 38, 36]; 
+        const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+        function noteToName(noteIndex) {
+            if (noteIndex < 0 || noteIndex > 127) return "---";
+            const octave = Math.floor(noteIndex / 12) - 1;
+            const name = noteNames[noteIndex % 12];
+            return `${name}${octave}`;
+        }
+
+        function nameToNote(noteName) {
+            if (!noteName) return null;
+            // Match format like C4, D#2, Bb-1
+            const match = noteName.trim().match(/^([a-gA-G][#bB]?)(-?\d+)$/);
+            if (!match) return null;
+
+            let name = match[1].toUpperCase();
+            // Convert Flat (b/B) to Sharp (#) internally for calculation
+            if (name.endsWith('B')) {
+                const flatMap = {"DB":"C#", "EB":"D#", "GB":"F#", "AB":"G#", "BB":"A#", "CB":"B", "FB":"E"};
+                name = flatMap[name] || name;
+            }
+
+            const octave = parseInt(match[2], 10);
+            const nameIdx = noteNames.indexOf(name);
+            if (nameIdx === -1) return null;
+
+            // C4 = 60 calculation
+            const note = (octave + 1) * 12 + nameIdx;
+            if (note < 0 || note > 127) return null;
+            return note;
+        }
+
+        function openSettings() {
+            const list = document.getElementById('midi-settings-list');
+            list.innerHTML = '';
+            
+            TRACK_LABELS.forEach((label, i) => {
+                const row = document.createElement('div');
+                row.className = 'flex justify-between items-center mb-3';
+                row.innerHTML = `
+                    <span class="text-sm font-bold text-gray-300 w-24 font-audiowide">${label}</span>
+                    <input type="text" id="midi-input-${i}" class="modal-input" value="${noteToName(midiMapping[i])}">
+                `;
+                list.appendChild(row);
+            });
+
+            document.getElementById('settings-error').innerText = '';
+            document.getElementById('midiSettingsModal').classList.add('active');
+        }
+
+        function saveSettings() {
+            let newMapping = [];
+            let hasError = false;
+            const errorEl = document.getElementById('settings-error');
+            errorEl.innerText = '';
+
+            for (let i = 0; i < 4; i++) {
+                const inputEl = document.getElementById(`midi-input-${i}`);
+                const val = inputEl.value;
+                const noteNum = nameToNote(val);
+                
+                if (noteNum === null) {
+                    hasError = true;
+                    inputEl.style.borderColor = '#f00';
+                } else {
+                    inputEl.style.borderColor = '#444';
+                    newMapping.push(noteNum);
+                }
+            }
+
+            if (hasError) {
+                errorEl.innerText = 'INVALID FORMAT! USE C4, D#2 ETC.';
+            } else {
+                midiMapping = newMapping;
+                document.getElementById('midiSettingsModal').classList.remove('active');
+            }
+        }
+
+
         // --- MIDI Export ---
         function exportMIDI() {
             const writeString = (view, offset, string) => {
@@ -534,14 +657,12 @@
             const PPQ = 480;
             const stepTicks = 120;
             let events = [];
-            // Mapping: 3=Kick(36), 2=Snare(38), 1=CH(42), 0=OH(46)
-            const noteMap = { 3: 36, 2: 38, 1: 42, 0: 46 };
 
             for (let step = 0; step < STEPS; step++) {
                 const tick = step * stepTicks;
                 for (let row = 0; row < 4; row++) {
                     if (gridState[row][step]) {
-                        const note = noteMap[row];
+                        const note = midiMapping[row]; // Use customized mapping
                         events.push({ tick: tick, type: 0x90, note: note, velocity: 100 });
                         events.push({ tick: tick + 60, type: 0x80, note: note, velocity: 0 });
                     }
@@ -569,11 +690,13 @@
 
             const blob = new Blob([bytes], { type: 'audio/midi' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `dubstep_pattern_64_${Date.now()}.mid`; a.click();
+            const a = document.createElement('a'); a.href = url; 
+            a.download = `dubstep_pattern.mid`; // Changed to fixed file name without numbers
+            a.click();
             URL.revokeObjectURL(url);
         }
 
-        // --- 30 Dubstep Presets (4-Bar Expanded) ---
+        // --- 30 Dubstep Presets (4-Bar Expanded with Fills) ---
         // Half-time logic: Kick usually on 1 (Step 0), Snare on 3 (Step 8) in a 16-step bar.
         // Expanded to 64 steps:
         // Bar 1: 0-15 (Snare on 8)
@@ -582,36 +705,36 @@
         // Bar 4: 48-63 (Snare on 56)
         
         const presets = [
-            { name: "1. The Basic Step", desc: "Classic half-time. Kick on 1, Snare on 3. Bar 4 varies.", k: [0, 16, 32, 48, 50, 58], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] },
-            { name: "2. Kick Shuffle", desc: "Syncopated kick flow with double kicks.", k: [0, 3, 10, 16, 19, 26, 32, 35, 42, 48, 51, 58, 61], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [14, 30, 46, 62] },
-            { name: "3. Heavy Drop", desc: "Standard drop pattern. Kick heavy.", k: [0, 2, 3, 12, 13, 16, 18, 19, 28, 29, 32, 34, 35, 44, 45, 48, 50, 51, 58, 60], s: [8, 24, 40, 56], ch: Array.from({length:64}, (_,i)=>i), oh: [0, 8, 16, 24, 32, 40, 48, 56] },
-            { name: "4. UK Garage Origins", desc: "2-step influence (Kick 1 & 3-and).", k: [0, 10, 16, 26, 32, 42, 48, 58, 60], s: [4, 12, 20, 28, 36, 44, 52, 60], ch: [0,2,4,6,8,10,12,14, 16,18,20,22,24,26,28,30, 32,34,36,38,40,42,44,46, 48,50,52,54,56,58,60,62], oh: [] },
-            { name: "5. Minimal Deep", desc: "Sparse and dark. Kick only on 1.", k: [0, 16, 32, 48, 58], s: [8, 24, 40, 56], ch: [4, 12, 20, 28, 36, 44, 52, 60], oh: [0, 16, 32, 48] },
-            { name: "6. Brostep Bounce", desc: "Aggressive syncopation. Kicks on offbeats.", k: [0, 3, 5, 16, 19, 21, 32, 35, 37, 48, 51, 53, 58, 61], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [5, 13, 21, 29, 37, 45, 53, 61] },
-            { name: "7. Rolling Hats", desc: "Double time hi-hats over half-time beat.", k: [0, 10, 16, 26, 32, 42, 48, 58], s: [8, 24, 40, 56], ch: Array.from({length:64}, (_,i)=>i), oh: [8, 24, 40, 56] },
-            { name: "8. Triple Kick", desc: "Rapid fire kicks. 16th note triplets feel.", k: [0, 1, 2, 11, 16, 17, 18, 27, 32, 33, 34, 43, 48, 49, 50, 59], s: [8, 24, 40, 56], ch: [0, 8, 16, 24, 32, 40, 48, 56], oh: [14, 30, 46, 62] },
-            { name: "9. Ghost Snares", desc: "Subtle ghost notes around the main snare.", k: [0, 11, 16, 27, 32, 43, 48, 58], s: [8, 11, 13, 15, 24, 27, 29, 31, 40, 43, 45, 47, 56, 59, 61, 63], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], oh: [] },
-            { name: "10. Reggae Dub", desc: "Skank feel. Emphasis on the offbeat.", k: [0, 5, 10, 16, 21, 26, 32, 37, 42, 48, 53, 58], s: [8, 24, 40, 56], ch: [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62], oh: [14, 30, 46, 62] },
-            { name: "11. Marching Step", desc: "Rigid structure. Kicks on 1, 2, 3.", k: [0, 4, 10, 16, 20, 26, 32, 36, 42, 48, 52, 58], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [0, 8, 16, 24, 32, 40, 48, 56] },
-            { name: "12. Broken Beat", desc: "Experimental placement. Kicks avoid the grid.", k: [0, 3, 7, 10, 16, 19, 23, 26, 32, 35, 39, 42, 48, 51, 55, 58], s: [8, 14, 24, 30, 40, 46, 56, 62], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], oh: [2, 18, 34, 50] },
-            { name: "13. Fast Fill", desc: "Drum fill loop style.", k: [0, 2, 4, 6, 16, 18, 20, 22, 32, 34, 36, 38, 48, 50, 52, 54], s: [8, 10, 12, 14, 24, 26, 28, 30, 40, 42, 44, 46, 56, 58, 60, 62], ch: Array.from({length:64}, (_,i)=>i), oh: [0, 8, 16, 24, 32, 40, 48, 56] },
-            { name: "14. Wobble Support", desc: "Leaves massive space for bass wobbles.", k: [0, 16, 32, 48], s: [8, 24, 40, 56], ch: [0, 8, 16, 24, 32, 40, 48, 56], oh: [4, 12, 20, 28, 36, 44, 52, 60] },
-            { name: "15. Trappy Dub", desc: "Trap hi-hats in dubstep tempo.", k: [0, 11, 16, 27, 32, 43, 48, 59], s: [8, 24, 40, 56], ch: [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27, 32,33,34,35, 40,41,42,43, 48,49,50,51, 56,57,58,59], oh: [0, 8, 16, 24, 32, 40, 48, 56] },
-            { name: "16. Chillstep", desc: "Smooth and liquid. 2-step feel.", k: [0, 10, 16, 26, 32, 42, 48, 58], s: [8, 24, 40, 56], ch: [0, 2, 4, 8, 10, 12, 16, 18, 20, 24, 26, 28, 32, 34, 36, 40, 42, 44, 48, 50, 52, 56, 58, 60], oh: [14, 30, 46, 62] },
-            { name: "17. Hard Hitter", desc: "Kick and Snare unison for impact.", k: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], s: [8, 24, 40, 56], ch: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62], oh: [0, 8, 16, 24, 32, 40, 48, 56] },
-            { name: "18. Funky Dub", desc: "Groovy ghost kicks.", k: [0, 2, 5, 11, 14, 16, 18, 21, 27, 30, 32, 34, 37, 43, 46, 48, 50, 53, 59, 62], s: [8, 24, 40, 56], ch: [4, 12, 20, 28, 36, 44, 52, 60], oh: [0, 16, 32, 48] },
-            { name: "19. The Build Up", desc: "Rising tension pattern (4 bars).", k: [0,4,8,12, 16,20,24,28, 32,34,36,38,40,42,44,46, 48,49,50,51,52,53,54,55], s: [4,12, 20,28, 36,44, 52,56,60], ch: [], oh: [] },
-            { name: "20. Total Chaos", desc: "Complex rhythm. Random feel.", k: [0, 3, 6, 9, 16, 19, 22, 25, 32, 35, 38, 41, 48, 51, 54, 57], s: [8, 12, 15, 24, 28, 31, 40, 44, 47, 56, 60, 63], ch: [1, 4, 7, 10, 13, 17, 20, 23, 26, 29, 33, 36, 39, 42, 45, 49, 52, 55, 58, 61], oh: [0, 2, 16, 18, 32, 34, 48, 50] },
-            { name: "21. Half-Step Roller", desc: "Consistent rolling bass kick.", k: [0, 11, 14, 16, 27, 30, 32, 43, 46, 48, 59, 62], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] },
-            { name: "22. Syncopated Flow", desc: "Offbeat snare accents.", k: [0, 10, 16, 26, 32, 42, 48, 58], s: [8, 24, 40, 56, 11, 27, 43, 59], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] },
-            { name: "23. Riddim Basic", desc: "Simple Riddim structure. Kick 1, Clap 3.", k: [0, 2, 16, 18, 32, 34, 48, 50], s: [8, 24, 40, 56], ch: [8, 24, 40, 56], oh: [] },
-            { name: "24. Riddim Chop", desc: "Choppy kicks for Riddim.", k: [0, 3, 4, 16, 19, 20, 32, 35, 36, 48, 51, 52], s: [8, 24, 40, 56], ch: [8, 24, 40, 56], oh: [] },
-            { name: "25. Tearout Assault", desc: "Relentless energy.", k: [0, 2, 4, 16, 18, 20, 32, 34, 36, 48, 50, 52], s: [8, 24, 40, 56], ch: Array.from({length:64}, (_,i)=>i), oh: [8, 24, 40, 56] },
-            { name: "26. Future Garage", desc: "Shuffle feel.", k: [0, 10, 16, 26, 32, 42, 48, 58], s: [4, 12, 20, 28, 36, 44, 52, 60], ch: [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63], oh: [] },
-            { name: "27. Deep Dub 140", desc: "Focus on sub weight.", k: [0, 14, 16, 30, 32, 46, 48, 62], s: [8, 24, 40, 56], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], oh: [14, 30, 46, 62] },
-            { name: "28. Tribal Dub", desc: "Percussive triplet feel.", k: [0, 3, 6, 16, 19, 22, 32, 35, 38, 48, 51, 54], s: [8, 24, 40, 56], ch: [2, 5, 8, 11, 18, 21, 24, 27, 34, 37, 40, 43, 50, 53, 56, 59], oh: [] },
-            { name: "29. 4x4 Dubstep", desc: "Kick on every beat (60s style).", k: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], s: [8, 24, 40, 56], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] },
-            { name: "30. Drumstep Flow", desc: "DnB speed feel at 140.", k: [0, 10, 16, 26, 32, 42, 48, 58], s: [4, 12, 20, 28, 36, 44, 52, 60], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] }
+            { name: "1. The Basic Step", desc: "Classic half-time. Kick on 1, Snare on 3. Bar 4 fill.", k: [0, 16, 32, 48, 50, 58, 61], s: [8, 24, 40, 56, 58, 60, 62], ch: Array.from({length:32}, (_,i)=>i*2), oh: [60, 62] },
+            { name: "2. Kick Shuffle", desc: "Syncopated kick flow. Snare roll fill.", k: [0, 3, 10, 16, 19, 26, 32, 35, 42, 48, 51, 58, 61], s: [8, 24, 40, 56, 57, 58, 60, 62], ch: Array.from({length:32}, (_,i)=>i*2), oh: [14, 30, 46, 62] },
+            { name: "3. Heavy Drop", desc: "Standard drop pattern. Kick heavy fill.", k: [0, 2, 3, 12, 13, 16, 18, 19, 28, 29, 32, 34, 35, 44, 45, 48, 50, 51, 56, 58, 60, 62], s: [8, 24, 40, 56, 61, 63], ch: Array.from({length:64}, (_,i)=>i), oh: [0, 8, 16, 24, 32, 40, 48, 56, 60, 62] },
+            { name: "4. UK Garage Origins", desc: "2-step influence. Hat fill.", k: [0, 10, 16, 26, 32, 42, 48, 58, 60], s: [4, 12, 20, 28, 36, 44, 52, 60, 62], ch: [0,2,4,6,8,10,12,14, 16,18,20,22,24,26,28,30, 32,34,36,38,40,42,44,46, 48,50,52,54,55,56,57,58,59,60,61,62,63], oh: [60] },
+            { name: "5. Minimal Deep", desc: "Sparse and dark. Kick only on 1. Subtle fill.", k: [0, 16, 32, 48, 58, 60], s: [8, 24, 40, 56, 62], ch: [4, 12, 20, 28, 36, 44, 52, 60, 61, 62, 63], oh: [0, 16, 32, 48, 56] },
+            { name: "6. Brostep Bounce", desc: "Aggressive syncopation. Fast snare fill.", k: [0, 3, 5, 16, 19, 21, 32, 35, 37, 48, 51, 53, 58, 60, 62], s: [8, 24, 40, 56, 59, 61, 63], ch: Array.from({length:32}, (_,i)=>i*2), oh: [5, 13, 21, 29, 37, 45, 53, 59, 61, 63] },
+            { name: "7. Rolling Hats", desc: "Double time hi-hats over half-time beat.", k: [0, 10, 16, 26, 32, 42, 48, 58, 62], s: [8, 24, 40, 56, 58, 60], ch: Array.from({length:64}, (_,i)=>i), oh: [8, 24, 40, 56, 60, 62] },
+            { name: "8. Triple Kick", desc: "Rapid fire kicks. 16th note triplets feel.", k: [0, 1, 2, 11, 16, 17, 18, 27, 32, 33, 34, 43, 48, 49, 50, 56, 57, 58, 60, 61, 62], s: [8, 24, 40, 56, 63], ch: [0, 8, 16, 24, 32, 40, 48, 56], oh: [14, 30, 46, 62] },
+            { name: "9. Ghost Snares", desc: "Subtle ghost notes around the main snare.", k: [0, 11, 16, 27, 32, 43, 48, 58, 60, 62], s: [8, 11, 13, 15, 24, 27, 29, 31, 40, 43, 45, 47, 56, 57, 58, 59, 60, 61, 62, 63], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], oh: [] },
+            { name: "10. Reggae Dub", desc: "Skank feel. Emphasis on the offbeat.", k: [0, 5, 10, 16, 21, 26, 32, 37, 42, 48, 53, 58, 60, 62], s: [8, 24, 40, 56, 61, 63], ch: [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 60, 62], oh: [14, 30, 46, 62] },
+            { name: "11. Marching Step", desc: "Rigid structure. Kicks on 1, 2, 3.", k: [0, 4, 10, 16, 20, 26, 32, 36, 42, 48, 52, 56, 58, 60, 62], s: [8, 24, 40, 56, 59, 63], ch: Array.from({length:32}, (_,i)=>i*2), oh: [0, 8, 16, 24, 32, 40, 48, 56, 60, 62] },
+            { name: "12. Broken Beat", desc: "Experimental placement. Kicks avoid the grid.", k: [0, 3, 7, 10, 16, 19, 23, 26, 32, 35, 39, 42, 48, 51, 55, 58, 61], s: [8, 14, 24, 30, 40, 46, 56, 60, 62, 63], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60], oh: [2, 18, 34, 50, 58, 62] },
+            { name: "13. Fast Fill", desc: "Drum fill loop style. Intense end fill.", k: [0, 2, 4, 6, 16, 18, 20, 22, 32, 34, 36, 38, 48, 50, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63], s: [8, 10, 12, 14, 24, 26, 28, 30, 40, 42, 44, 46, 56, 58, 60, 62], ch: Array.from({length:64}, (_,i)=>i), oh: [0, 8, 16, 24, 32, 40, 48, 56, 60, 62] },
+            { name: "14. Wobble Support", desc: "Leaves massive space for bass wobbles.", k: [0, 16, 32, 48, 60, 62], s: [8, 24, 40, 56, 58, 59, 60, 61, 62, 63], ch: [0, 8, 16, 24, 32, 40, 48, 56, 60, 62], oh: [4, 12, 20, 28, 36, 44, 52, 60] },
+            { name: "15. Trappy Dub", desc: "Trap hi-hats in dubstep tempo.", k: [0, 11, 16, 27, 32, 43, 48, 59, 62], s: [8, 24, 40, 56, 60, 61, 62, 63], ch: [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27, 32,33,34,35, 40,41,42,43, 48,49,50,51, 56,57,58,59, 60,61,62,63], oh: [0, 8, 16, 24, 32, 40, 48, 56] },
+            { name: "16. Chillstep", desc: "Smooth and liquid. 2-step feel.", k: [0, 10, 16, 26, 32, 42, 48, 58, 60], s: [8, 24, 40, 56, 62, 63], ch: [0, 2, 4, 8, 10, 12, 16, 18, 20, 24, 26, 28, 32, 34, 36, 40, 42, 44, 48, 50, 52, 56, 58, 60, 61, 62, 63], oh: [14, 30, 46, 62] },
+            { name: "17. Hard Hitter", desc: "Kick and Snare unison for impact.", k: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 58, 60, 62], s: [8, 24, 40, 56, 58, 60, 62], ch: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63], oh: [0, 8, 16, 24, 32, 40, 48, 56, 60, 62] },
+            { name: "18. Funky Dub", desc: "Groovy ghost kicks.", k: [0, 2, 5, 11, 14, 16, 18, 21, 27, 30, 32, 34, 37, 43, 46, 48, 50, 53, 59, 62], s: [8, 24, 40, 56, 58, 60, 61], ch: [4, 12, 20, 28, 36, 44, 52, 60, 62], oh: [0, 16, 32, 48, 60] },
+            { name: "19. The Build Up", desc: "Rising tension pattern (4 bars).", k: [0,4,8,12, 16,20,24,28, 32,34,36,38,40,42,44,46, 48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63], s: [4,12, 20,28, 36,44, 52,56,58,60,62,63], ch: [56,57,58,59,60,61,62,63], oh: [60,62] },
+            { name: "20. Total Chaos", desc: "Complex rhythm. Random feel.", k: [0, 3, 6, 9, 16, 19, 22, 25, 32, 35, 38, 41, 48, 51, 54, 57, 60, 62], s: [8, 12, 15, 24, 28, 31, 40, 44, 47, 56, 58, 59, 60, 61, 63], ch: [1, 4, 7, 10, 13, 17, 20, 23, 26, 29, 33, 36, 39, 42, 45, 49, 52, 55, 58, 61, 62, 63], oh: [0, 2, 16, 18, 32, 34, 48, 50, 58, 60] },
+            { name: "21. Half-Step Roller", desc: "Consistent rolling bass kick.", k: [0, 11, 14, 16, 27, 30, 32, 43, 46, 48, 59, 62], s: [8, 24, 40, 56, 58, 60, 62], ch: Array.from({length:32}, (_,i)=>i*2), oh: [60, 62] },
+            { name: "22. Syncopated Flow", desc: "Offbeat snare accents.", k: [0, 10, 16, 26, 32, 42, 48, 58, 60], s: [8, 24, 40, 56, 11, 27, 43, 59, 61, 62, 63], ch: Array.from({length:32}, (_,i)=>i*2), oh: [] },
+            { name: "23. Riddim Basic", desc: "Simple Riddim structure. Kick 1, Clap 3.", k: [0, 2, 16, 18, 32, 34, 48, 50, 58, 60, 62], s: [8, 24, 40, 56, 63], ch: [8, 24, 40, 56, 58, 60, 62], oh: [60, 62] },
+            { name: "24. Riddim Chop", desc: "Choppy kicks for Riddim.", k: [0, 3, 4, 16, 19, 20, 32, 35, 36, 48, 51, 52, 58, 60, 61, 62], s: [8, 24, 40, 56, 63], ch: [8, 24, 40, 56, 58, 60, 62], oh: [60] },
+            { name: "25. Tearout Assault", desc: "Relentless energy.", k: [0, 2, 4, 16, 18, 20, 32, 34, 36, 48, 50, 52, 56, 58, 60, 62], s: [8, 24, 40, 56, 58, 60, 62, 63], ch: Array.from({length:64}, (_,i)=>i), oh: [8, 24, 40, 56, 60, 62] },
+            { name: "26. Future Garage", desc: "Shuffle feel.", k: [0, 10, 16, 26, 32, 42, 48, 58, 61], s: [4, 12, 20, 28, 36, 44, 52, 60, 62, 63], ch: [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63], oh: [60] },
+            { name: "27. Deep Dub 140", desc: "Focus on sub weight.", k: [0, 14, 16, 30, 32, 46, 48, 62], s: [8, 24, 40, 56, 58, 59, 60, 61], ch: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 62], oh: [14, 30, 46, 62] },
+            { name: "28. Tribal Dub", desc: "Percussive triplet feel.", k: [0, 3, 6, 16, 19, 22, 32, 35, 38, 48, 51, 54, 58, 60, 62], s: [8, 24, 40, 56, 63], ch: [2, 5, 8, 11, 18, 21, 24, 27, 34, 37, 40, 43, 50, 53, 56, 59, 60, 61, 62], oh: [60] },
+            { name: "29. 4x4 Dubstep", desc: "Kick on every beat (60s style).", k: [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 58, 60, 62], s: [8, 24, 40, 56, 58, 60, 62, 63], ch: Array.from({length:32}, (_,i)=>i*2), oh: [60, 62] },
+            { name: "30. Drumstep Flow", desc: "DnB speed feel at 140.", k: [0, 10, 16, 26, 32, 42, 48, 58, 60, 62], s: [4, 12, 20, 28, 36, 44, 52, 60, 61, 62, 63], ch: Array.from({length:32}, (_,i)=>i*2), oh: [60] }
         ];
 
         // --- UI Generation ---
@@ -800,11 +923,20 @@
             });
             sel.addEventListener('change', (e) => loadPreset(e.target.value));
 
+            // Setup Controls
             document.getElementById('playBtn').addEventListener('click', play);
             document.getElementById('stopBtn').addEventListener('click', stop);
             document.getElementById('clearBtn').addEventListener('click', clearGrid);
             document.getElementById('exportBtn').addEventListener('click', exportMIDI);
             
+            // Setup MIDI Settings Events
+            document.getElementById('settingsBtn').addEventListener('click', openSettings);
+            document.getElementById('cancelSettingsBtn').addEventListener('click', () => {
+                document.getElementById('midiSettingsModal').classList.remove('active');
+            });
+            document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+
+            // Sliders
             document.getElementById('bpmSlider').addEventListener('input', (e) => {
                 bpm = parseInt(e.target.value);
                 document.getElementById('bpmVal').innerText = bpm;
